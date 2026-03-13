@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  wug-otlp-exporter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wug-otlp-exporter
+    restart: unless-stopped
+    environment:
+      # WhatsUp Gold Configuration
+      WUG_URL: ${WUG_URL:-https://localhost:9644/api/v1}
+      WUG_USERNAME: ${WUG_USERNAME:-admin}
+      WUG_PASSWORD: ${WUG_PASSWORD:-password}
+      VERIFY_SSL: ${VERIFY_SSL:-true}
+
+      # OTLP Configuration
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-localhost:4317}
+      OTLP_PROTOCOL: ${OTLP_PROTOCOL:-grpc}
+      OTLP_HEADERS: ${OTLP_HEADERS:-}
+
+      # Service Configuration
+      SERVICE_NAME: ${SERVICE_NAME:-whatsup-gold}
+      SCRAPE_INTERVAL: ${SCRAPE_INTERVAL:-60}
+
+    networks:
+      - monitoring
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # OpenTelemetry Collector (opcional - para testes locais)
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    restart: unless-stopped
+    command:
+      - "--config=/etc/otel-collector-config.yml"
+    volumes:
+      - ./otel-collector-config.yml:/etc/otel-collector-config.yml
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Prometheus metrics
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+
+  # Prometheus (opcional - para testes locais)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  prometheus_data:

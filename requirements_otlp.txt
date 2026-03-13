@@ -1,0 +1,18 @@
+# WhatsUp Gold OTLP Exporter Requirements
+
+# Core dependencies
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# OpenTelemetry Core
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+
+# OpenTelemetry Exporters
+opentelemetry-exporter-otlp>=0.41b0
+opentelemetry-exporter-otlp-proto-grpc>=0.41b0
+opentelemetry-exporter-otlp-proto-http>=0.41b0
+
+# Utilities
+protobuf>=4.25.0
+grpcio>=1.60.0
