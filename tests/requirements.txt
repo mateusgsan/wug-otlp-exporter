@@ -1,0 +1,16 @@
+# Test Requirements
+
+# Core testing framework
+pytest>=8.0.0
+
+# Mocking library
+pytest-mock>=3.12.0
+
+# HTTP request mocking
+requests-mock>=1.11.0
+
+# Code coverage
+pytest-cov>=4.1.0
+
+# Test utilities
+freezegun>=1.4.0
