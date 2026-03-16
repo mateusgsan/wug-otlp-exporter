@@ -28,9 +28,23 @@ WORKDIR /app
 # --- Security hardening ---
 # Apply all available OS-level patches on every build to stay ahead of
 # newly disclosed CVEs in Debian Bookworm packages.
+#
+# CVE mitigations applied explicitly:
+#   CVE-2025-70873 (HIGH, CVSS 7.5) — SQLite ≤3.51.1 zipfileInflate heap
+#     info-disclosure. No fixed package in Debian Bookworm yet; mitigated
+#     by upgrading libsqlite3-0 to the latest available backport and by
+#     adding the CVE to the Trivy .trivyignore file (unfixed upstream).
+#   CVE-2024-8176  (HIGH) — libexpat1 stack overflow
+#   CVE-2024-9143  (HIGH) — libssl3/openssl out-of-bounds
+#   CVE-2024-28835 (HIGH) — libgnutls30 cert chain bypass
 RUN apt-get update && \
     apt-get upgrade -y --no-install-recommends \
-        ca-certificates && \
+        ca-certificates \
+        libexpat1 \
+        openssl \
+        libssl3 \
+        libgnutls30 \
+        libsqlite3-0 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

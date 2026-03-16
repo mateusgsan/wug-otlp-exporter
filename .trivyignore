@@ -1,0 +1,26 @@
+# Trivy CVE ignore list
+# Format: <CVE-ID> [expiry-date] [# comment]
+#
+# CVEs listed here are acknowledged but have no available fix in the
+# current base image (python:3.14-slim-bookworm / Debian Bookworm).
+# Each entry must be reviewed and renewed periodically.
+#
+# ─────────────────────────────────────────────────────────────────────
+# CVE-2025-70873 | HIGH | CVSS 7.5 | libsqlite3-0
+# SQLite ≤3.51.1 zipfileInflate function in the zipfile extension allows
+# attackers to obtain heap memory via a crafted ZIP file (info-disclosure).
+# Status: NO FIX available in Debian Bookworm as of 2026-03-16.
+# Workaround: libsqlite3-0 upgraded to latest available backport via
+#             apt-get upgrade in Dockerfile. Will be removed once Debian
+#             Bookworm ships a patched sqlite3 package.
+# Reference: https://cve.circl.lu/cve/CVE-2025-70873
+CVE-2025-70873
+
+# ─────────────────────────────────────────────────────────────────────
+# CVE-2024-26461 | MEDIUM | CVSS 6.5 | libkrb5-3
+# Kerberos GSS-API memory leak. No fix in Debian Bookworm.
+CVE-2024-26461
+
+# CVE-2024-26458 | MEDIUM | CVSS 5.9 | libkrb5-3
+# Kerberos GSSAPI memory leak. No fix in Debian Bookworm.
+CVE-2024-26458
