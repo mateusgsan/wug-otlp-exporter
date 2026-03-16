@@ -1,17 +1,21 @@
 # WhatsUp Gold OTLP Exporter Requirements
+#
+# NOTA: O parâmetro `export_interval_millis` foi introduzido no SDK 1.21+.
+# Versões anteriores usavam `interval_millis` (depreciado).
+# Fixamos versões mínimas para garantir compatibilidade.
 
 # Core dependencies
 requests>=2.31.0
 python-dotenv>=1.0.0
 
-# OpenTelemetry Core
-opentelemetry-api>=1.20.0
-opentelemetry-sdk>=1.20.0
+# OpenTelemetry Core (>=1.21.0 requerido para export_interval_millis)
+opentelemetry-api>=1.21.0
+opentelemetry-sdk>=1.21.0
 
 # OpenTelemetry Exporters
-opentelemetry-exporter-otlp>=0.41b0
-opentelemetry-exporter-otlp-proto-grpc>=0.41b0
-opentelemetry-exporter-otlp-proto-http>=0.41b0
+opentelemetry-exporter-otlp>=1.21.0
+opentelemetry-exporter-otlp-proto-grpc>=1.21.0
+opentelemetry-exporter-otlp-proto-http>=1.21.0
 
 # Utilities
 protobuf>=4.25.0

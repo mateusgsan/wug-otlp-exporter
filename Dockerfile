@@ -24,7 +24,7 @@ COPY requirements_otlp.txt .
 
 # Instalar dependências Python
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install -r requirements_otlp.txt
+    pip install --upgrade -r requirements_otlp.txt
 
 # Copiar código da aplicação
 COPY wug_otlp_exporter.py .
