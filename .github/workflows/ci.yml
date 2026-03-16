@@ -83,21 +83,76 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # for PR decoration
         SONAR_TOKEN:  ${{ secrets.SONAR_TOKEN }}    # SonarCloud authentication
       # sonar-project.properties in repo root drives all configuration.
-      # sonar.qualitygate.wait=true (set in sonar-project.properties)
-      # causes this step to fail if the Quality Gate is not passed.
+      # sonar.qualitygate.wait=false to avoid NONE status on first analysis (Free plan)
+      # Quality Gate is enforced in the next step via SonarCloud API.
+
+    - name: Enforce Quality Gate via SonarCloud API
+      # Polls the SonarCloud API to check overall code metrics.
+      # On the Free plan, 'new code' metrics require a baseline; we check overall metrics instead.
+      # Fails the pipeline if: bugs > 0, vulnerabilities > 0, security_hotspots_reviewed < 100%, coverage < 80%
+      run: |
+        echo "Checking SonarCloud Quality Gate status via API..."
+        SONAR_RESPONSE=$(curl -s \
+          -H "Authorization: Bearer ${{ secrets.SONAR_TOKEN }}" \
+          "https://sonarcloud.io/api/measures/component?component=mateusgsan_wug-otlp-exporter&metricKeys=bugs,vulnerabilities,coverage,security_hotspots,security_hotspots_reviewed,code_smells,duplicated_lines_density")
+
+        echo "$SONAR_RESPONSE" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+measures = {m['metric']: float(m.get('value', 0)) for m in d.get('component', {}).get('measures', [])}
+
+bugs          = int(measures.get('bugs', 0))
+vulns         = int(measures.get('vulnerabilities', 0))
+coverage      = measures.get('coverage', 0.0)
+hotspots      = int(measures.get('security_hotspots', 0))
+reviewed_pct  = measures.get('security_hotspots_reviewed', 100.0) if hotspots > 0 else 100.0
+
+print('--- SonarCloud Quality Gate (Overall Code) ---')
+print(f'  Bugs:                  {bugs}  (threshold: 0)')
+print(f'  Vulnerabilities:       {vulns}  (threshold: 0)')
+print(f'  Coverage:              {coverage:.1f}%  (threshold: >= 80%)')
+print(f'  Security Hotspots:     {hotspots}')
+print(f'  Hotspots Reviewed:     {reviewed_pct:.0f}%  (threshold: 100%)')
+print()
+
+failed = []
+if bugs > 0:           failed.append(f'BUGS: {bugs} (expected 0)')
+if vulns > 0:          failed.append(f'VULNERABILITIES: {vulns} (expected 0)')
+if coverage < 80.0:    failed.append(f'COVERAGE: {coverage:.1f}% (expected >= 80%)')
+if reviewed_pct < 100: failed.append(f'HOTSPOTS_REVIEWED: {reviewed_pct:.0f}% (expected 100%)')
+
+if failed:
+    print('Quality Gate: FAILED')
+    for f in failed: print(f'  - {f}')
+    sys.exit(1)
+else:
+    print('Quality Gate: PASSED')
+"
 
     - name: Write SonarCloud summary
       if: always()
       run: |
+        SONAR_RESPONSE=$(curl -s \
+          -H "Authorization: Bearer ${{ secrets.SONAR_TOKEN }}" \
+          "https://sonarcloud.io/api/measures/component?component=mateusgsan_wug-otlp-exporter&metricKeys=bugs,vulnerabilities,coverage,security_hotspots,code_smells,duplicated_lines_density,reliability_rating,security_rating,sqale_rating,ncloc")
+        BUGS=$(echo $SONAR_RESPONSE | python3 -c "import json,sys; m={x['metric']:x.get('value','N/A') for x in json.load(sys.stdin)['component']['measures']}; print(m.get('bugs','N/A'))")
+        VULNS=$(echo $SONAR_RESPONSE | python3 -c "import json,sys; m={x['metric']:x.get('value','N/A') for x in json.load(sys.stdin)['component']['measures']}; print(m.get('vulnerabilities','N/A'))")
+        COV=$(echo $SONAR_RESPONSE | python3 -c "import json,sys; m={x['metric']:x.get('value','N/A') for x in json.load(sys.stdin)['component']['measures']}; print(m.get('coverage','N/A'))")
+        SMELLS=$(echo $SONAR_RESPONSE | python3 -c "import json,sys; m={x['metric']:x.get('value','N/A') for x in json.load(sys.stdin)['component']['measures']}; print(m.get('code_smells','N/A'))")
+        NCLOC=$(echo $SONAR_RESPONSE | python3 -c "import json,sys; m={x['metric']:x.get('value','N/A') for x in json.load(sys.stdin)['component']['measures']}; print(m.get('ncloc','N/A'))")
         echo "## SonarCloud Quality Gate" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Metric | Value | Threshold |" >> $GITHUB_STEP_SUMMARY
+        echo "| :--- | :---: | :---: |" >> $GITHUB_STEP_SUMMARY
+        echo "| Bugs | ${BUGS} | 0 |" >> $GITHUB_STEP_SUMMARY
+        echo "| Vulnerabilities | ${VULNS} | 0 |" >> $GITHUB_STEP_SUMMARY
+        echo "| Coverage | ${COV}% | ≥ 80% |" >> $GITHUB_STEP_SUMMARY
+        echo "| Code Smells | ${SMELLS} | - |" >> $GITHUB_STEP_SUMMARY
+        echo "| Lines of Code | ${NCLOC} | - |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
         echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Project** | [mateusgsan_wug-otlp-exporter](https://sonarcloud.io/project/overview?id=mateusgsan_wug-otlp-exporter) |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Organization** | [mateusgsan](https://sonarcloud.io/organizations/mateusgsan) |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Dashboard** | https://sonarcloud.io/project/overview?id=mateusgsan_wug-otlp-exporter |" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "> Quality Gate configured in \`sonar-project.properties\`. Requires 0 bugs, 0 vulnerabilities, 0 unreviewed security hotspots and ≥80% coverage on new code." >> $GITHUB_STEP_SUMMARY
+        echo "| **Dashboard** | [View on SonarCloud](https://sonarcloud.io/project/overview?id=mateusgsan_wug-otlp-exporter) |" >> $GITHUB_STEP_SUMMARY
 
   # ─────────────────────────────────────────────────────────────
   # JOB 3: Python Dependency Vulnerability Scan (pip-audit)
