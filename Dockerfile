@@ -14,7 +14,7 @@
 FROM python:3.14-slim-bookworm
 
 # Metadata
-LABEL maintainer="Your Organization"
+LABEL maintainer="Vericode Tecnologia"
 LABEL description="WhatsUp Gold OTLP Exporter for Grafana Cloud"
 LABEL version="1.2"
 
