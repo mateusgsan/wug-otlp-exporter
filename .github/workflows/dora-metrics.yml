@@ -1,14 +1,13 @@
 name: DORA Metrics
-
 # This workflow collects the four DORA (DevOps Research and Assessment) metrics:
 #
-#   1. Deployment Frequency   – triggered on every successful deploy to main
-#   2. Lead Time for Changes  – time from first commit to production deploy
-#   3. Change Failure Rate    – ratio of failed deployments (tracked via GitHub Issues)
-#   4. Mean Time to Restore   – time to close incidents tagged as "incident"
+#   1. Deployment Frequency   - triggered on every successful deploy to main
+#   2. Lead Time for Changes  - time from first commit to production deploy
+#   3. Change Failure Rate    - ratio of incidents vs deploys (via GitHub Issues)
+#   4. Mean Time to Restore   - time to close incidents tagged as "incident"
 #
-# All metrics are stored as GitHub Actions job summaries and as structured
-# JSON artifacts for integration with external dashboards (Grafana, DataDog, etc.).
+# All metrics are stored as GitHub Actions Step Summaries and as structured
+# JSON artifacts for integration with external dashboards (Grafana, etc.).
 
 on:
   push:
@@ -36,80 +35,112 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0   # full history required to calculate lead time
+        fetch-depth: 0
 
-    - name: Calculate DORA metrics
+    - name: Calculate Deployment Frequency & Lead Time
       id: dora
       run: |
-        # ── Deployment Frequency ──────────────────────────────────
-        # Count deploys (pushes to main) in the last 30 days
         SINCE=$(date -d '30 days ago' --iso-8601=seconds)
         DEPLOY_COUNT=$(git log --oneline --after="$SINCE" origin/main 2>/dev/null | wc -l)
         DEPLOY_FREQ=$(echo "scale=2; $DEPLOY_COUNT / 30" | bc)
 
-        # ── Lead Time for Changes ─────────────────────────────────
-        # Time between the oldest commit in this push and now
         FIRST_COMMIT_TS=$(git log --pretty=format:"%ct" | tail -1)
         NOW_TS=$(date +%s)
         LEAD_TIME_SECS=$(( NOW_TS - FIRST_COMMIT_TS ))
         LEAD_TIME_HOURS=$(echo "scale=2; $LEAD_TIME_SECS / 3600" | bc)
         LEAD_TIME_DAYS=$(echo "scale=2; $LEAD_TIME_SECS / 86400" | bc)
 
-        # ── Current commit info ───────────────────────────────────
+        if (( $(echo "$DEPLOY_FREQ >= 1" | bc -l) )); then
+          DF_RATING="Elite (>= 1/day)"
+        elif (( $(echo "$DEPLOY_FREQ >= 0.142" | bc -l) )); then
+          DF_RATING="High (>= 1/week)"
+        elif (( $(echo "$DEPLOY_FREQ >= 0.033" | bc -l) )); then
+          DF_RATING="Medium (>= 1/month)"
+        else
+          DF_RATING="Low (< 1/month)"
+        fi
+
+        if (( $(echo "$LEAD_TIME_HOURS <= 24" | bc -l) )); then
+          LT_RATING="Elite (< 1 day)"
+        elif (( $(echo "$LEAD_TIME_HOURS <= 168" | bc -l) )); then
+          LT_RATING="High (< 1 week)"
+        elif (( $(echo "$LEAD_TIME_HOURS <= 720" | bc -l) )); then
+          LT_RATING="Medium (< 1 month)"
+        else
+          LT_RATING="Low (> 1 month)"
+        fi
+
         COMMIT_SHA="${{ github.sha }}"
         COMMIT_MSG=$(git log -1 --pretty=format:"%s")
         DEPLOY_TIME=$(date --iso-8601=seconds)
 
-        echo "deploy_count=$DEPLOY_COUNT"       >> $GITHUB_OUTPUT
-        echo "deploy_freq=$DEPLOY_FREQ"         >> $GITHUB_OUTPUT
-        echo "lead_time_hours=$LEAD_TIME_HOURS" >> $GITHUB_OUTPUT
-        echo "lead_time_days=$LEAD_TIME_DAYS"   >> $GITHUB_OUTPUT
-        echo "deploy_time=$DEPLOY_TIME"         >> $GITHUB_OUTPUT
-        echo "commit_sha=$COMMIT_SHA"           >> $GITHUB_OUTPUT
-        echo "commit_msg=$COMMIT_MSG"           >> $GITHUB_OUTPUT
+        echo "deploy_count=$DEPLOY_COUNT"       >> "$GITHUB_OUTPUT"
+        echo "deploy_freq=$DEPLOY_FREQ"         >> "$GITHUB_OUTPUT"
+        echo "lead_time_hours=$LEAD_TIME_HOURS" >> "$GITHUB_OUTPUT"
+        echo "lead_time_days=$LEAD_TIME_DAYS"   >> "$GITHUB_OUTPUT"
+        echo "deploy_time=$DEPLOY_TIME"         >> "$GITHUB_OUTPUT"
+        echo "commit_sha=$COMMIT_SHA"           >> "$GITHUB_OUTPUT"
+        echo "commit_msg=$COMMIT_MSG"           >> "$GITHUB_OUTPUT"
+        echo "df_rating=$DF_RATING"             >> "$GITHUB_OUTPUT"
+        echo "lt_rating=$LT_RATING"             >> "$GITHUB_OUTPUT"
 
-    - name: Save DORA metrics artifact
+    - name: Save deployment metrics artifact
       run: |
         mkdir -p dora-artifacts
-        cat > dora-artifacts/deployment-metrics.json << EOF
+        DEPLOY_COUNT="${{ steps.dora.outputs.deploy_count }}"
+        DEPLOY_FREQ="${{ steps.dora.outputs.deploy_freq }}"
+        LT_HOURS="${{ steps.dora.outputs.lead_time_hours }}"
+        LT_DAYS="${{ steps.dora.outputs.lead_time_days }}"
+        DF_RATING="${{ steps.dora.outputs.df_rating }}"
+        LT_RATING="${{ steps.dora.outputs.lt_rating }}"
+        COMMIT="${{ steps.dora.outputs.commit_sha }}"
+        COMMIT_MSG="${{ steps.dora.outputs.commit_msg }}"
+        DEPLOY_TIME="${{ steps.dora.outputs.deploy_time }}"
+        REPO="${{ github.repository }}"
+        BRANCH="${{ github.ref_name }}"
+        cat > dora-artifacts/deployment-metrics.json << JSONEOF
         {
-          "timestamp": "${{ steps.dora.outputs.deploy_time }}",
-          "commit": "${{ steps.dora.outputs.commit_sha }}",
-          "commit_message": "${{ steps.dora.outputs.commit_msg }}",
-          "repository": "${{ github.repository }}",
-          "branch": "${{ github.ref_name }}",
+          "timestamp": "${DEPLOY_TIME}",
+          "commit": "${COMMIT}",
+          "commit_message": "${COMMIT_MSG}",
+          "repository": "${REPO}",
+          "branch": "${BRANCH}",
           "dora": {
             "deployment_frequency": {
-              "deploys_last_30_days": ${{ steps.dora.outputs.deploy_count }},
-              "deploys_per_day": ${{ steps.dora.outputs.deploy_freq }},
-              "rating": "$([ $(echo "${{ steps.dora.outputs.deploy_freq }} >= 1" | bc -l) -eq 1 ] && echo 'Elite' || echo 'High')"
+              "deploys_last_30d": ${DEPLOY_COUNT},
+              "deploys_per_day": ${DEPLOY_FREQ},
+              "rating": "${DF_RATING}"
             },
             "lead_time_for_changes": {
-              "hours": ${{ steps.dora.outputs.lead_time_hours }},
-              "days": ${{ steps.dora.outputs.lead_time_days }},
-              "rating": "$([ $(echo "${{ steps.dora.outputs.lead_time_hours }} <= 24" | bc -l) -eq 1 ] && echo 'Elite' || echo 'High')"
+              "hours": ${LT_HOURS},
+              "days": ${LT_DAYS},
+              "rating": "${LT_RATING}"
             }
           }
         }
-        EOF
+        JSONEOF
 
-    - name: Upload DORA artifact
+    - name: Upload deployment metrics artifact
       uses: actions/upload-artifact@v4
       with:
-        name: dora-deployment-metrics-${{ github.sha }}
+        name: dora-deployment-metrics-${{ github.run_id }}
         path: dora-artifacts/
         retention-days: 90
 
-    - name: Write Job Summary
+    - name: Write DORA Step Summary
       run: |
-        echo "## DORA Metrics — Deployment" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Metric | Value | Rating |" >> $GITHUB_STEP_SUMMARY
-        echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Deployment Frequency** | ${{ steps.dora.outputs.deploy_count }} deploys / 30 days (${{ steps.dora.outputs.deploy_freq }}/day) | $([ $(echo "${{ steps.dora.outputs.deploy_freq }} >= 1" | bc -l) -eq 1 ] && echo '🟢 Elite' || echo '🟡 High') |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Lead Time for Changes** | ${{ steps.dora.outputs.lead_time_hours }} hours (${{ steps.dora.outputs.lead_time_days }} days) | $([ $(echo "${{ steps.dora.outputs.lead_time_hours }} <= 24" | bc -l) -eq 1 ] && echo '🟢 Elite' || echo '🟡 High') |" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "> Commit: \`${{ steps.dora.outputs.commit_sha }}\` — ${{ steps.dora.outputs.commit_msg }}" >> $GITHUB_STEP_SUMMARY
+        {
+          echo "## DORA Metrics"
+          echo ""
+          echo "| Metric | Value | Rating |"
+          echo "| :--- | :--- | :--- |"
+          echo "| **Deployment Frequency** | ${{ steps.dora.outputs.deploy_count }} deploys / 30 days (${{ steps.dora.outputs.deploy_freq }}/day) | ${{ steps.dora.outputs.df_rating }} |"
+          echo "| **Lead Time for Changes** | ${{ steps.dora.outputs.lead_time_hours }} hours (${{ steps.dora.outputs.lead_time_days }} days) | ${{ steps.dora.outputs.lt_rating }} |"
+          echo ""
+          echo "> Commit: \`${{ steps.dora.outputs.commit_sha }}\` — ${{ steps.dora.outputs.commit_msg }}"
+          echo ""
+          echo "> _Change Failure Rate and MTTR are calculated when issues labeled 'incident' are opened or closed._"
+        } >> "$GITHUB_STEP_SUMMARY"
 
   # ─────────────────────────────────────────────────────────────
   # METRIC 3 & 4: Change Failure Rate + Mean Time to Restore
@@ -127,99 +158,76 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.14'
+
     - name: Calculate Change Failure Rate & MTTR
+      id: reliability
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         REPO="${{ github.repository }}"
+        SINCE=$(date -d '30 days ago' --iso-8601=seconds)
 
-        # ── Fetch incidents (issues labeled "incident") ───────────
-        INCIDENTS=$(gh issue list \
+        gh issue list \
           --repo "$REPO" \
           --label "incident" \
           --state all \
           --json number,title,createdAt,closedAt,state \
-          --limit 100 2>/dev/null || echo "[]")
+          --limit 100 > /tmp/incidents.json 2>/dev/null || echo "[]" > /tmp/incidents.json
 
-        TOTAL_INCIDENTS=$(echo "$INCIDENTS" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d))")
-        CLOSED_INCIDENTS=$(echo "$INCIDENTS" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len([x for x in d if x['state']=='CLOSED']))")
-
-        # ── Fetch total deploys (pushes to main last 30 days) ─────
-        SINCE=$(date -d '30 days ago' --iso-8601=seconds)
         TOTAL_DEPLOYS=$(git log --oneline --after="$SINCE" origin/main 2>/dev/null | wc -l)
 
-        # ── Change Failure Rate ───────────────────────────────────
-        if [ "$TOTAL_DEPLOYS" -gt 0 ]; then
-          CFR=$(echo "scale=4; $TOTAL_INCIDENTS / $TOTAL_DEPLOYS * 100" | bc)
-        else
-          CFR="0"
-        fi
+        METRICS=$(TOTAL_DEPLOYS="$TOTAL_DEPLOYS" python3 scripts/dora_mttr.py < /tmp/incidents.json)
 
-        # ── MTTR (mean time to restore for closed incidents) ──────
-        MTTR_HOURS=$(echo "$INCIDENTS" | python3 - << 'PYEOF'
-import json, sys
-from datetime import datetime, timezone
+        MTTR_HOURS=$(echo "$METRICS" | grep "^mttr_hours=" | cut -d= -f2)
+        CFR=$(echo "$METRICS" | grep "^cfr_percent=" | cut -d= -f2)
+        CFR_RATING=$(echo "$METRICS" | grep "^cfr_rating=" | cut -d= -f2-)
+        MTTR_RATING=$(echo "$METRICS" | grep "^mttr_rating=" | cut -d= -f2-)
+        CLOSED=$(echo "$METRICS" | grep "^closed_incidents=" | cut -d= -f2)
+        TOTAL_INC=$(echo "$METRICS" | grep "^total_incidents=" | cut -d= -f2)
 
-data = json.load(sys.stdin)
-closed = [x for x in data if x.get('closedAt') and x.get('createdAt')]
-if not closed:
-    print("0")
-else:
-    fmt = "%Y-%m-%dT%H:%M:%SZ"
-    durations = []
-    for issue in closed:
-        created = datetime.strptime(issue['createdAt'], fmt).replace(tzinfo=timezone.utc)
-        closed_at = datetime.strptime(issue['closedAt'], fmt).replace(tzinfo=timezone.utc)
-        durations.append((closed_at - created).total_seconds() / 3600)
-    print(f"{sum(durations)/len(durations):.2f}")
-PYEOF
-)
+        echo "mttr_hours=$MTTR_HOURS"       >> "$GITHUB_OUTPUT"
+        echo "cfr=$CFR"                     >> "$GITHUB_OUTPUT"
+        echo "cfr_rating=$CFR_RATING"       >> "$GITHUB_OUTPUT"
+        echo "mttr_rating=$MTTR_RATING"     >> "$GITHUB_OUTPUT"
+        echo "closed=$CLOSED"               >> "$GITHUB_OUTPUT"
+        echo "total_inc=$TOTAL_INC"         >> "$GITHUB_OUTPUT"
+        echo "total_deploys=$TOTAL_DEPLOYS" >> "$GITHUB_OUTPUT"
 
-        # ── CFR Rating ────────────────────────────────────────────
-        CFR_RATING=$(python3 -c "
-cfr = float('${CFR}')
-if cfr <= 5: print('Elite (≤5%)')
-elif cfr <= 10: print('High (≤10%)')
-elif cfr <= 15: print('Medium (≤15%)')
-else: print('Low (>15%)')
-")
-
-        # ── MTTR Rating ───────────────────────────────────────────
-        MTTR_RATING=$(python3 -c "
-h = float('${MTTR_HOURS}')
-if h <= 1: print('Elite (< 1h)')
-elif h <= 24: print('High (< 1 day)')
-elif h <= 168: print('Medium (< 1 week)')
-else: print('Low (> 1 week)')
-")
-
+    - name: Save reliability metrics artifact
+      run: |
         mkdir -p dora-artifacts
-        cat > dora-artifacts/reliability-metrics.json << EOF
+        CFR="${{ steps.reliability.outputs.cfr }}"
+        CFR_RATING="${{ steps.reliability.outputs.cfr_rating }}"
+        MTTR="${{ steps.reliability.outputs.mttr_hours }}"
+        MTTR_RATING="${{ steps.reliability.outputs.mttr_rating }}"
+        TOTAL_INC="${{ steps.reliability.outputs.total_inc }}"
+        TOTAL_DEP="${{ steps.reliability.outputs.total_deploys }}"
+        CLOSED="${{ steps.reliability.outputs.closed }}"
+        REPO="${{ github.repository }}"
+        TS=$(date --iso-8601=seconds)
+        cat > dora-artifacts/reliability-metrics.json << JSONEOF
         {
-          "timestamp": "$(date --iso-8601=seconds)",
-          "repository": "$REPO",
+          "timestamp": "${TS}",
+          "repository": "${REPO}",
           "dora": {
             "change_failure_rate": {
-              "total_incidents_30d": $TOTAL_INCIDENTS,
-              "total_deploys_30d": $TOTAL_DEPLOYS,
-              "rate_percent": $CFR,
-              "rating": "$CFR_RATING"
+              "total_incidents_30d": ${TOTAL_INC},
+              "total_deploys_30d": ${TOTAL_DEP},
+              "rate_percent": ${CFR},
+              "rating": "${CFR_RATING}"
             },
             "mean_time_to_restore": {
-              "hours": $MTTR_HOURS,
-              "closed_incidents": $CLOSED_INCIDENTS,
-              "rating": "$MTTR_RATING"
+              "hours": ${MTTR},
+              "closed_incidents": ${CLOSED},
+              "rating": "${MTTR_RATING}"
             }
           }
         }
-        EOF
-
-        echo "## DORA Metrics — Reliability" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Metric | Value | Rating |" >> $GITHUB_STEP_SUMMARY
-        echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Change Failure Rate** | ${CFR}% (${TOTAL_INCIDENTS} incidents / ${TOTAL_DEPLOYS} deploys) | ${CFR_RATING} |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Mean Time to Restore** | ${MTTR_HOURS} hours | ${MTTR_RATING} |" >> $GITHUB_STEP_SUMMARY
+        JSONEOF
 
     - name: Upload reliability artifact
       uses: actions/upload-artifact@v4
@@ -227,3 +235,14 @@ else: print('Low (> 1 week)')
         name: dora-reliability-metrics-${{ github.run_id }}
         path: dora-artifacts/
         retention-days: 90
+
+    - name: Write Reliability Step Summary
+      run: |
+        {
+          echo "## DORA Metrics — Reliability"
+          echo ""
+          echo "| Metric | Value | Rating |"
+          echo "| :--- | :--- | :--- |"
+          echo "| **Change Failure Rate** | ${{ steps.reliability.outputs.cfr }}% (${{ steps.reliability.outputs.total_inc }} incidents / ${{ steps.reliability.outputs.total_deploys }} deploys) | ${{ steps.reliability.outputs.cfr_rating }} |"
+          echo "| **Mean Time to Restore** | ${{ steps.reliability.outputs.mttr_hours }} hours | ${{ steps.reliability.outputs.mttr_rating }} |"
+        } >> "$GITHUB_STEP_SUMMARY"
